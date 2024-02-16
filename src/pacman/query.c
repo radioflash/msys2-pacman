@@ -61,7 +61,11 @@ static int search_path(char **filename, struct stat *bufptr)
 			path[--plen] = '\0';
 		}
 
-		fullname = malloc(plen + flen + 2);
+		/* Reserve 4 additional bytes for a potential .exe extension
+		 * This is not always needed, but we want to avoid reallocating
+		 * later.
+		 */
+		fullname = malloc(plen + flen + 2 + 4);
 		if(!fullname) {
 			free(envpath);
 			return -1;
@@ -70,6 +74,30 @@ static int search_path(char **filename, struct stat *bufptr)
 
 		if(lstat(fullname, bufptr) == 0) {
 			free(*filename);
+
+			/* We check if the file actually has an .exe suffix by lstat'ing 
+			 * the same path with .exe suffix and checking if the inode 
+			 * numbers are the same: If they are, we return the name with 
+			 * .exe appended, because otherwise the package ownership check
+			 * breaks/fails.
+			 */
+			strcat(fullname, ".exe");
+			struct stat sbExe;
+			if (lstat(fullname, &sbExe) == 0) {
+				if (sbExe.st_ino == bufptr.st_ino) {
+					/* => the actual file has a .exe suffix */
+					*filename = fullname;
+					*bufptr = sbExe;
+					free(envpath);
+					return 0;
+				}
+			}
+			/* undo the .exe suffix, because there is no such file or it's 
+			 * different from the one without .exe suffix.
+			 */
+			fullname[plen + flen + 2] = '\0';
+			
+
 			*filename = fullname;
 			free(envpath);
 			return 0;
